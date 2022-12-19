@@ -1,0 +1,116 @@
+# Install lightkurve with the code below
+
+
+%%capture
+pip install lightkurve
+
+
+# Import Libraries
+from lightkurve import search_targetpixelfile 
+from lightkurve import TessTargetPixelFile
+import lightkurve as lk
+import numpy as np
+
+
+# Download TESS data 
+from urllib.request import urlopen
+from io import BytesIO
+from zipfile import ZipFile
+
+def download_and_unzip(url, extract_to='.'):
+    http_response = urlopen(url)
+    zipfile = ZipFile(BytesIO(http_response.read()))
+    zipfile.extractall(path=extract_to)
+
+product_group_id = '104653134'
+url = 'https://mast.stsci.edu/api/v0.1/Download/bundle.zip?previews=false&obsid=' + product_group_id
+destination = '/TESS/'
+
+download_and_unzip(url, destination)
+
+
+# Navigate the Pixel File (under FITS category) from the downloaded TESS data
+tpf = TessTargetPixelFile("/TESS/MAST_2022-12-16T1820/TESS/tess2022302161335-s0058-0000000264613302-0247-s/tess2022302161335-s0058-0000000264613302-0247-s_tp.fits")
+
+
+# Display the snapshot frame
+tpf.plot(frame=42)
+
+
+# Plot the lightcurve
+lc = tpf.to_lightcurve(aperture_mask=tpf.pipeline_mask)
+lc.plot()
+
+
+# Flatten the light curve
+flat_lc = lc.flatten()
+flat_lc.plot()
+
+
+# Try and find the period 
+period = np.linspace(1, 5, 10000)
+bls = lc.to_periodogram(method='bls', period=period, frequency_factor=500)
+bls.plot()
+
+star_x_period = bls.period_at_max_power
+star_x_t0 = bls.transit_time_at_max_power
+star_x_dur = bls.duration_at_max_power
+
+
+# Phase-fold the ligthcurve based on the discovered period at max power
+ax = lc.fold(period=star_x_period, epoch_time=star_x_t0).scatter()
+ax.set_xlim(-1,1)
+
+
+# Exploring the Frequency Spectrum
+pg = lc.normalize().to_periodogram()
+pg.plot();
+
+
+pg = lc.normalize().to_periodogram(minimum_frequency=35,
+                                   maximum_frequency=60)
+pg.plot();
+
+
+pg = lc.normalize(unit='ppm').to_periodogram(normalization='psd')
+pg.plot(scale='log');
+
+
+zoom_pg = lc.normalize(unit='ppm').to_periodogram(normalization='psd',
+                                                  minimum_frequency=1500,
+                                                  maximum_frequency=2700)
+zoom_pg.plot();
+
+
+# Smooth and Detrend a Periodigram
+# The box kernel filter
+smooth_pg = zoom_pg.smooth(method='boxkernel', filter_width=0.5)
+ax = zoom_pg.plot(label='Original')
+smooth_pg.plot(ax=ax, color='red', label='Smoothed');
+
+
+# The log median filter
+smooth_pg = pg.smooth(method='logmedian', filter_width=0.1)
+ax = pg.plot(label='Original')
+smooth_pg.plot(ax=ax, linewidth=2,  color='red', label='Smoothed', scale='log');
+
+
+# Flattening
+snrpg = pg.flatten()
+snrpg.plot();
+
+
+# Using Asteroseismology to Analyze the Star
+seismology = snrpg.to_seismology()
+seismology.estimate_numax()
+
+
+seismology.numax.value
+
+
+seismology.diagnose_numax();
+
+
+# References:
+# Lightkurve.org. (n.d.). Tutorials. Lightkurve. Retrieved from https://docs.lightkurve.org/tutorials/index.html
+#
